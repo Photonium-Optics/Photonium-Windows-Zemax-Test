@@ -69,13 +69,19 @@ export default function Home() {
       if (json.exists) {
         push(`✓ Path exists`);
         if (json.directories && json.directories.length > 0) {
-          push(`Directories found: ${json.directories.slice(0, 5).join(', ')}${json.directories.length > 5 ? '...' : ''}`);
+          push(`Directories found: ${json.directories.slice(0, 8).join(', ')}${json.directories.length > 8 ? '...' : ''}`);
+        }
+        if (json.dlls && json.dlls.length > 0) {
+          push(`DLL files: ${json.dlls.slice(0, 5).join(', ')}${json.dlls.length > 5 ? '...' : ''}`);
+        }
+        if (json.api_files && json.api_files.length > 0) {
+          push(`✓ Potential API files: ${json.api_files.join(', ')}`);
         }
         if (json.api_found_in && json.api_found_in.length > 0) {
-          push(`✓ API files found in: ${json.api_found_in.join(', ')}`);
-          push(`Try setting path to: ${zemaxPath} (or maybe a parent directory)`);
-        } else {
-          push(`✗ No API files found. Try a different path or check subdirectories.`);
+          push(`✓ API subdirectories: ${json.api_found_in.join(', ')}`);
+          push(`Try one of these paths or check the APIP directory`);
+        } else if (!json.api_files || json.api_files.length === 0) {
+          push(`✗ No obvious API files found. Check subdirectories like APIP`);
         }
       } else {
         push(`✗ Path does not exist`);

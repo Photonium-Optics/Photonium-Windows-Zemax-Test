@@ -150,15 +150,40 @@ namespace SimpleBridge
                         
                         // Check for API in subdirectories
                         var apiDirs = new System.Collections.Generic.List<string>();
+                        var apiFiles = new System.Collections.Generic.List<string>();
+                        
+                        // Look for API files in current directory
+                        string[] apiFilePatterns = new string[] {
+                            "ZOSAPI*.dll", "ZOS-API*.dll", "*OpticStudio*.dll", 
+                            "Ansys.Zemax*.dll", "*Zemax*.dll"
+                        };
+                        
+                        foreach (string pattern in apiFilePatterns)
+                        {
+                            var files = Directory.GetFiles(scanPath, pattern, SearchOption.TopDirectoryOnly);
+                            apiFiles.AddRange(files.Select(f => Path.GetFileName(f)));
+                        }
+                        
+                        // Check subdirectories
                         foreach (string dir in Directory.GetDirectories(scanPath))
                         {
-                            if (File.Exists(Path.Combine(dir, "ZOSAPI.dll")) || 
-                                File.Exists(Path.Combine(dir, "ZOSAPI_NetHelper.dll")))
+                            bool foundInDir = false;
+                            foreach (string pattern in apiFilePatterns)
+                            {
+                                if (Directory.GetFiles(dir, pattern).Length > 0)
+                                {
+                                    foundInDir = true;
+                                    break;
+                                }
+                            }
+                            if (foundInDir)
                             {
                                 apiDirs.Add(Path.GetFileName(dir));
                             }
                         }
+                        
                         result["api_found_in"] = apiDirs.ToArray();
+                        result["api_files"] = apiFiles.Distinct().ToArray();
                     }
                     
                     SendJson(ctx, 200, result);
