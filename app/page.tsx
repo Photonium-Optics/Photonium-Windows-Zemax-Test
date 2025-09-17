@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 
 const BRIDGE = 'http://127.0.0.1:8765';
 const ZMX_URL = '/zmx/DoubleGauss.zmx';
-const INSTALLER_URL = 'https://github.com/Photonium-Optics/Photonium-Windows-Zemax-Test/releases';
+const INSTALLER_URL = 'https://github.com/Photonium-Optics/Photonium-Windows-Zemax-Test/releases/latest';
 
 async function callBridge(path: string, init?: RequestInit) {
   const ctrl = new AbortController();

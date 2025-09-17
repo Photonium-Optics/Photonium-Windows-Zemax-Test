@@ -17,6 +17,44 @@ namespace SimpleBridge
         static string _origin = "*";
         static Assembly _zosApi;
 
+        static string GetZemaxPath()
+        {
+            // First try to read from config file
+            string configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.txt");
+            if (File.Exists(configPath))
+            {
+                foreach (string line in File.ReadAllLines(configPath))
+                {
+                    if (line.StartsWith("ZEMAX_PATH="))
+                    {
+                        string path = line.Substring("ZEMAX_PATH=".Length).Trim();
+                        Console.WriteLine("Using Zemax path from config: " + path);
+                        return path;
+                    }
+                }
+            }
+            
+            // Try common locations
+            string[] commonPaths = new string[] {
+                @"C:\Program Files\Zemax OpticStudio",
+                @"C:\Program Files\Zemax OpticStudio 2024",
+                @"C:\Program Files\Zemax OpticStudio 2023",
+                @"C:\Program Files\Ansys\Zemax OpticStudio",
+                @"C:\Program Files\ZEMAX13"
+            };
+            
+            foreach (string path in commonPaths)
+            {
+                if (Directory.Exists(Path.Combine(path, "ZOS-API Assemblies")))
+                {
+                    Console.WriteLine("Found Zemax at: " + path);
+                    return path;
+                }
+            }
+            
+            throw new Exception("Could not find Zemax. Please edit config.txt and set ZEMAX_PATH to your installation folder.");
+        }
+        
         static void Main(string[] args)
         {
             Console.WriteLine("Photonium Zemax Bridge (Simple Version)");
@@ -33,7 +71,7 @@ namespace SimpleBridge
             }
             catch (HttpListenerException e)
             {
-                Console.Error.WriteLine($"Failed to start: {e.Message}");
+                Console.Error.WriteLine("Failed to start: " + e.Message);
                 Console.Error.WriteLine("Run as administrator or use the installer to reserve the URL");
                 Console.ReadKey();
                 return;
@@ -85,8 +123,8 @@ namespace SimpleBridge
                     LoadZemaxIfNeeded();
                     SendJson(ctx, 200, new { 
                         ok = true, 
-                        mode = _app?.Mode.ToString() ?? "Unknown",
-                        license_ok = _app?.IsValidLicenseForAPI ?? false
+                        mode = _app != null ? _app.Mode.ToString() : "Unknown",
+                        license_ok = _app != null ? _app.IsValidLicenseForAPI : false
                     });
                 }
                 catch (Exception ex)
@@ -143,11 +181,11 @@ namespace SimpleBridge
             Console.WriteLine("Loading Zemax API...");
             
             // Try to find and load Zemax assemblies at runtime
-            string zemaxDir = @"C:\Program Files\Zemax OpticStudio";
+            string zemaxDir = GetZemaxPath();
             string asmDir = Path.Combine(zemaxDir, "ZOS-API Assemblies");
             
             if (!Directory.Exists(asmDir))
-                throw new Exception($"Zemax not found at {zemaxDir}");
+                throw new Exception("Zemax not found at " + zemaxDir);
             
             // Load the NetHelper assembly
             var helperPath = Path.Combine(asmDir, "ZOSAPI_NetHelper.dll");

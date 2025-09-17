@@ -1,0 +1,12 @@
+# Configuration for Photonium Zemax Bridge
+# Edit this file to match your Zemax installation
+
+# Path to your Zemax OpticStudio installation folder
+# Common paths:
+# C:\Program Files\Zemax OpticStudio
+# C:\Program Files\Zemax OpticStudio 2024
+# C:\Program Files\Zemax OpticStudio 2023
+# C:\Program Files\ZEMAX13
+# C:\Program Files\Ansys\Zemax OpticStudio
+
+ZEMAX_PATH=C:\Program Files\Zemax OpticStudio

@@ -1,0 +1,3 @@
+\\Mac\AllFiles\Users\Jennifer\Desktop\Photonium_Windows_Executable\photonium-zemax-web\bridge\SimpleBridge\obj\Release\SimpleBridge.csprojResolveAssemblyReference.cache
+\\Mac\AllFiles\Users\Jennifer\Desktop\Photonium_Windows_Executable\photonium-zemax-web\bridge\SimpleBridge\bin\Release\PhotoniumZemaxBridge.exe
+\\Mac\AllFiles\Users\Jennifer\Desktop\Photonium_Windows_Executable\photonium-zemax-web\bridge\SimpleBridge\obj\Release\PhotoniumZemaxBridge.exe

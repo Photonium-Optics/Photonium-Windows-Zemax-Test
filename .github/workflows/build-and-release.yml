@@ -1,0 +1,67 @@
+name: Build and Release Bridge
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'bridge/SimpleBridge/**'
+      - '.github/workflows/build-and-release.yml'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v1.1
+      
+    - name: Build Bridge
+      run: |
+        cd bridge/SimpleBridge
+        msbuild SimpleBridge.csproj /p:Configuration=Release /p:Platform=x64
+        
+    - name: Create Release Package
+      run: |
+        mkdir release
+        copy bridge\SimpleBridge\bin\Release\PhotoniumZemaxBridge.exe release\
+        copy bridge\SimpleBridge\config.txt release\
+        Compress-Archive -Path release\* -DestinationPath PhotoniumZemaxBridge.zip
+        
+    - name: Get current date
+      id: date
+      run: echo "::set-output name=date::$(date +'%Y.%m.%d')"
+      shell: bash
+      
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ steps.date.outputs.date }}-${{ github.run_number }}
+        release_name: Bridge Release ${{ steps.date.outputs.date }}
+        body: |
+          Automated build of Photonium Zemax Bridge
+          
+          ## Installation
+          1. Download PhotoniumZemaxBridge.zip
+          2. Extract to any folder
+          3. Edit config.txt with your Zemax path
+          4. Run PhotoniumZemaxBridge.exe
+          
+          ## Changes
+          ${{ github.event.head_commit.message }}
+        draft: false
+        prerelease: false
+        
+    - name: Upload Release Assets
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./PhotoniumZemaxBridge.zip
+        asset_name: PhotoniumZemaxBridge.zip
+        asset_content_type: application/zip
