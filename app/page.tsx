@@ -125,7 +125,7 @@ export default function Home() {
               <p className="font-semibold mb-2">Quick Setup (2 minutes):</p>
               <ol className="list-decimal list-inside space-y-1">
                 <li>Download and run the installer</li>
-                <li>Click "Install" (admin rights required)</li>
+                <li>Click &quot;Install&quot; (admin rights required)</li>
                 <li>The bridge will start automatically</li>
                 <li>Refresh this page to continue</li>
               </ol>
