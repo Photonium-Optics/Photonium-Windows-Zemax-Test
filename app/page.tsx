@@ -38,8 +38,9 @@ export default function Home() {
       push('Starting OpticStudio (Standalone)...');
       const json = await callBridge('/start', { method: 'POST' });
       push(`✓ OK: mode=${json.mode}, license_ok=${json.license_ok}`);
-    } catch (err: any) {
-      push(`✗ Bridge not reachable. Is zemax_bridge.py running? ${String(err?.message || err)}`);
+    } catch (err) {
+      const error = err as Error;
+      push(`✗ Bridge not reachable. Is zemax_bridge.py running? ${String(error?.message || err)}`);
     } finally {
       setLoading(null);
     }
@@ -55,8 +56,9 @@ export default function Home() {
         body: JSON.stringify({ url, filename: 'site_file.zmx' }),
       });
       push(`✓ Loaded: ${json.loaded}`);
-    } catch (err: any) {
-      push(`✗ Load failed: ${String(err?.message || err)}`);
+    } catch (err) {
+      const error = err as Error;
+      push(`✗ Load failed: ${String(error?.message || err)}`);
     } finally {
       setLoading(null);
     }
