@@ -16,10 +16,18 @@ namespace SimpleBridge
         static JavaScriptSerializer _json = new JavaScriptSerializer();
         static string _origin = "*";
         static Assembly _zosApi;
+        static string _customZemaxPath = null;
 
         static string GetZemaxPath()
         {
-            // First try to read from config file
+            // First check if custom path was set via API
+            if (!string.IsNullOrEmpty(_customZemaxPath))
+            {
+                Console.WriteLine("Using custom Zemax path: " + _customZemaxPath);
+                return _customZemaxPath;
+            }
+            
+            // Try to read from config file
             string configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.txt");
             if (File.Exists(configPath))
             {
@@ -134,6 +142,45 @@ namespace SimpleBridge
                 return;
             }
 
+            // POST /set_path
+            if (req.HttpMethod == "POST" && path == "/set_path")
+            {
+                try
+                {
+                    var body = new StreamReader(req.InputStream).ReadToEnd();
+                    dynamic data = _json.DeserializeObject(body);
+                    string zemaxPath = data["path"];
+                    
+                    // Validate the path
+                    if (!Directory.Exists(zemaxPath))
+                    {
+                        SendJson(ctx, 400, new { ok = false, error = "Path does not exist: " + zemaxPath });
+                        return;
+                    }
+                    
+                    if (!Directory.Exists(Path.Combine(zemaxPath, "ZOS-API Assemblies")))
+                    {
+                        SendJson(ctx, 400, new { ok = false, error = "No ZOS-API Assemblies found in: " + zemaxPath });
+                        return;
+                    }
+                    
+                    _customZemaxPath = zemaxPath;
+                    _app = null; // Reset connection to use new path
+                    _sys = null;
+                    
+                    // Save to config file for persistence
+                    string configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.txt");
+                    File.WriteAllText(configPath, "# Auto-updated by website\nZEMAX_PATH=" + zemaxPath);
+                    
+                    SendJson(ctx, 200, new { ok = true, path = zemaxPath });
+                }
+                catch (Exception ex)
+                {
+                    SendJson(ctx, 500, new { ok = false, error = ex.Message });
+                }
+                return;
+            }
+            
             // POST /open_url
             if (req.HttpMethod == "POST" && path == "/open_url")
             {
