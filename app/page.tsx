@@ -73,8 +73,6 @@ export default function Home() {
         }
         if (json.api_found_in && json.api_found_in.length > 0) {
           push(`✓ API files found in: ${json.api_found_in.join(', ')}`);
-          // Suggest the correct path
-          const suggestedPath = `${zemaxPath}\\${json.api_found_in[0]}`;
           push(`Try setting path to: ${zemaxPath} (or maybe a parent directory)`);
         } else {
           push(`✗ No API files found. Try a different path or check subdirectories.`);
@@ -91,7 +89,7 @@ export default function Home() {
   const setZemaxPathOnBridge = async () => {
     try {
       push(`Setting Zemax path to: ${zemaxPath}`);
-      const json = await callBridge('/set_path', {
+      await callBridge('/set_path', {
         method: 'POST',
         body: JSON.stringify({ path: zemaxPath }),
       });
@@ -109,7 +107,7 @@ export default function Home() {
       push('Starting OpticStudio (Standalone)...');
       const json = await callBridge('/start', { method: 'POST' });
       push(`✓ OK: mode=${json.mode}, license_ok=${json.license_ok}`);
-    } catch (err: any) {
+    } catch (err) {
       const error = err as Error;
       push(`✗ Failed: ${String(error?.message || err)}`);
       
