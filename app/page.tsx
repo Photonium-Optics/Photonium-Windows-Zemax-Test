@@ -1,8 +1,9 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 const BRIDGE = 'http://127.0.0.1:8765';
 const ZMX_URL = '/zmx/DoubleGauss.zmx';
+const INSTALLER_URL = 'https://github.com/Photonium-Optics/Photonium-Windows-Zemax-Test/releases/download/v1.0.0/Photonium-Zemax-Bridge-Setup.exe';
 
 async function callBridge(path: string, init?: RequestInit) {
   const ctrl = new AbortController();
@@ -27,10 +28,34 @@ async function callBridge(path: string, init?: RequestInit) {
 }
 
 export default function Home() {
+  const [bridgeStatus, setBridgeStatus] = useState<'checking' | 'online' | 'offline'>('checking');
   const [log, setLog] = useState<string[]>([]);
   const [loading, setLoading] = useState<string | null>(null);
 
   const push = (m: string) => setLog(l => [`${new Date().toLocaleTimeString()}  ${m}`, ...l]);
+
+  // Check if bridge is running on page load
+  useEffect(() => {
+    const checkBridge = async () => {
+      try {
+        await callBridge('/health');
+        setBridgeStatus('online');
+        push('✓ Bridge detected and running');
+      } catch {
+        setBridgeStatus('offline');
+      }
+    };
+    checkBridge();
+    
+    // Re-check every 5 seconds if offline
+    const interval = setInterval(() => {
+      if (bridgeStatus === 'offline') {
+        checkBridge();
+      }
+    }, 5000);
+    
+    return () => clearInterval(interval);
+  }, [bridgeStatus]);
 
   const onStart = async () => {
     try {
@@ -40,7 +65,10 @@ export default function Home() {
       push(`✓ OK: mode=${json.mode}, license_ok=${json.license_ok}`);
     } catch (err) {
       const error = err as Error;
-      push(`✗ Bridge not reachable. Is zemax_bridge.py running? ${String(error?.message || err)}`);
+      push(`✗ Failed: ${String(error?.message || err)}`);
+      // Try fallback protocol
+      push('Attempting protocol handler fallback...');
+      window.location.href = 'photonium-zemax://start';
     } finally {
       setLoading(null);
     }
@@ -58,17 +86,89 @@ export default function Home() {
       push(`✓ Loaded: ${json.loaded}`);
     } catch (err) {
       const error = err as Error;
-      push(`✗ Load failed: ${String(error?.message || err)}`);
+      push(`✗ Failed: ${String(error?.message || err)}`);
+      // Try fallback protocol
+      push('Attempting protocol handler fallback...');
+      const url = encodeURIComponent(new URL(ZMX_URL, window.location.origin).toString());
+      window.location.href = `photonium-zemax://open?url=${url}&filename=site_file.zmx`;
     } finally {
       setLoading(null);
     }
   };
 
+  // Show installer download if bridge is not running
+  if (bridgeStatus === 'offline') {
+    return (
+      <main className="max-w-3xl mx-auto p-8">
+        <div className="mb-8">
+          <h1 className="text-4xl font-bold mb-2">Photonium ↔ OpticStudio</h1>
+          <p className="text-gray-600">Control OpticStudio from your browser</p>
+        </div>
+
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 mb-8">
+          <h2 className="text-xl font-semibold text-yellow-900 mb-4">
+            Bridge Not Detected
+          </h2>
+          <p className="text-yellow-800 mb-6">
+            To control OpticStudio from this website, you need to install the Photonium Zemax Bridge on your Windows PC.
+          </p>
+          
+          <div className="space-y-4">
+            <a 
+              href={INSTALLER_URL}
+              className="inline-block px-8 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-lg font-medium"
+            >
+              ⬇ Download Photonium Zemax Bridge
+            </a>
+            
+            <div className="text-sm text-yellow-700">
+              <p className="font-semibold mb-2">Quick Setup (2 minutes):</p>
+              <ol className="list-decimal list-inside space-y-1">
+                <li>Download and run the installer</li>
+                <li>Click "Install" (admin rights required)</li>
+                <li>The bridge will start automatically</li>
+                <li>Refresh this page to continue</li>
+              </ol>
+            </div>
+          </div>
+        </div>
+
+        <div className="text-center">
+          <button 
+            onClick={() => window.location.reload()}
+            className="px-6 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+          >
+            🔄 Refresh Page
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  // Show loading state while checking
+  if (bridgeStatus === 'checking') {
+    return (
+      <main className="max-w-3xl mx-auto p-8">
+        <div className="text-center">
+          <h1 className="text-2xl mb-4">Checking bridge connection...</h1>
+          <div className="animate-pulse">⏳</div>
+        </div>
+      </main>
+    );
+  }
+
+  // Bridge is online - show control buttons
   return (
     <main className="max-w-3xl mx-auto p-8">
       <div className="mb-8">
         <h1 className="text-4xl font-bold mb-2">Photonium ↔ OpticStudio</h1>
-        <p className="text-gray-600">Control OpticStudio on your PC through a local bridge</p>
+        <p className="text-gray-600">Control OpticStudio on your PC</p>
+        <div className="mt-2">
+          <span className="inline-flex items-center gap-2 text-sm text-green-600">
+            <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+            Bridge Connected
+          </span>
+        </div>
       </div>
 
       <div className="flex gap-4 mb-8">
@@ -90,20 +190,20 @@ export default function Home() {
         </button>
       </div>
 
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-8">
-        <h3 className="font-semibold text-blue-900 mb-2">Setup Requirements</h3>
-        <ol className="list-decimal list-inside text-blue-800 space-y-1">
-          <li>Install Ansys Zemax OpticStudio on your Windows PC</li>
-          <li>Install Python 3.8+ (64-bit) with required packages</li>
-          <li>Run the bridge: <code className="bg-white px-2 py-1 rounded">python zemax_bridge.py</code></li>
-          <li>Bridge must be accessible at <code className="bg-white px-2 py-1 rounded">http://127.0.0.1:8765</code></li>
-        </ol>
+      <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-8">
+        <h3 className="font-semibold text-gray-900 mb-2">System Requirements</h3>
+        <ul className="text-gray-700 space-y-1 text-sm">
+          <li>✓ Windows 10/11 (64-bit)</li>
+          <li>✓ Ansys Zemax OpticStudio installed</li>
+          <li>✓ Valid OpticStudio license with API access</li>
+          <li>✓ Photonium Zemax Bridge running</li>
+        </ul>
       </div>
 
       <div>
         <h3 className="font-semibold mb-2">Activity Log</h3>
-        <pre className="bg-gray-900 text-green-400 p-4 rounded-lg min-h-[200px] overflow-y-auto font-mono text-sm">
-          {log.length > 0 ? log.join('\n') : 'No activity yet. Click a button to start.'}
+        <pre className="bg-gray-900 text-green-400 p-4 rounded-lg min-h-[200px] max-h-[400px] overflow-y-auto font-mono text-sm">
+          {log.length > 0 ? log.join('\n') : 'Ready. Click a button to control OpticStudio.'}
         </pre>
       </div>
     </main>
