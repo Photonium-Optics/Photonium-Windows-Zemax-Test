@@ -29,21 +29,10 @@
     <Reference Include="System.Web.Extensions" />
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="System.Net.Http" />
-    <Reference Include="ZOSAPI">
-      <HintPath>C:\Program Files\Zemax OpticStudio\ZOS-API Assemblies\ZOSAPI.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="ZOSAPI_Interfaces">
-      <HintPath>C:\Program Files\Zemax OpticStudio\ZOS-API Assemblies\ZOSAPI_Interfaces.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="ZOSAPI_NetHelper">
-      <HintPath>C:\Program Files\Zemax OpticStudio\ZOS-API Assemblies\ZOSAPI_NetHelper.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="ZOSAPIStubs.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
