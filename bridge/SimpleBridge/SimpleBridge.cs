@@ -1,6 +1,7 @@
 // Simple bridge that uses late binding - no Zemax required at compile time!
 using System;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Reflection;
 using System.Text;
@@ -123,6 +124,52 @@ namespace SimpleBridge
                 return;
             }
 
+            // POST /scan_path - helps find Zemax installation
+            if (req.HttpMethod == "POST" && path == "/scan_path")
+            {
+                try
+                {
+                    var body = new StreamReader(req.InputStream).ReadToEnd();
+                    dynamic data = _json.DeserializeObject(body);
+                    string scanPath = data["path"];
+                    
+                    var result = new System.Collections.Generic.Dictionary<string, object>();
+                    result["path"] = scanPath;
+                    result["exists"] = Directory.Exists(scanPath);
+                    
+                    if (Directory.Exists(scanPath))
+                    {
+                        // List subdirectories
+                        var dirs = Directory.GetDirectories(scanPath).Select(d => Path.GetFileName(d)).ToArray();
+                        result["directories"] = dirs;
+                        
+                        // Look for DLL files
+                        var dlls = Directory.GetFiles(scanPath, "*.dll", SearchOption.TopDirectoryOnly)
+                            .Select(f => Path.GetFileName(f)).ToArray();
+                        result["dlls"] = dlls;
+                        
+                        // Check for API in subdirectories
+                        var apiDirs = new System.Collections.Generic.List<string>();
+                        foreach (string dir in Directory.GetDirectories(scanPath))
+                        {
+                            if (File.Exists(Path.Combine(dir, "ZOSAPI.dll")) || 
+                                File.Exists(Path.Combine(dir, "ZOSAPI_NetHelper.dll")))
+                            {
+                                apiDirs.Add(Path.GetFileName(dir));
+                            }
+                        }
+                        result["api_found_in"] = apiDirs.ToArray();
+                    }
+                    
+                    SendJson(ctx, 200, result);
+                }
+                catch (Exception ex)
+                {
+                    SendJson(ctx, 500, new { ok = false, error = ex.Message });
+                }
+                return;
+            }
+
             // POST /start
             if (req.HttpMethod == "POST" && path == "/start")
             {
@@ -137,7 +184,8 @@ namespace SimpleBridge
                 }
                 catch (Exception ex)
                 {
-                    SendJson(ctx, 500, new { ok = false, error = ex.Message });
+                    Console.WriteLine("Error starting OpticStudio: " + ex.ToString());
+                    SendJson(ctx, 500, new { ok = false, error = ex.Message, details = ex.ToString() });
                 }
                 return;
             }
@@ -158,9 +206,33 @@ namespace SimpleBridge
                         return;
                     }
                     
-                    if (!Directory.Exists(Path.Combine(zemaxPath, "ZOS-API Assemblies")))
+                    // Check for API assemblies in various possible locations
+                    string[] possibleApiPaths = new string[] {
+                        Path.Combine(zemaxPath, "ZOS-API Assemblies"),
+                        Path.Combine(zemaxPath, "ZOS-API"),
+                        Path.Combine(zemaxPath, "API"),
+                        zemaxPath // Sometimes DLLs are in root
+                    };
+                    
+                    bool foundApi = false;
+                    foreach (string apiPath in possibleApiPaths)
                     {
-                        SendJson(ctx, 400, new { ok = false, error = "No ZOS-API Assemblies found in: " + zemaxPath });
+                        if (Directory.Exists(apiPath) && 
+                            (File.Exists(Path.Combine(apiPath, "ZOSAPI.dll")) || 
+                             File.Exists(Path.Combine(apiPath, "ZOSAPI_NetHelper.dll"))))
+                        {
+                            foundApi = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!foundApi)
+                    {
+                        // List what we did find to help user
+                        string[] files = Directory.GetFiles(zemaxPath, "*.dll", SearchOption.TopDirectoryOnly);
+                        string[] dirs = Directory.GetDirectories(zemaxPath);
+                        string found = "Found dirs: " + string.Join(", ", dirs.Select(d => Path.GetFileName(d)).Take(5));
+                        SendJson(ctx, 400, new { ok = false, error = "No API files found. " + found });
                         return;
                     }
                     
@@ -229,10 +301,28 @@ namespace SimpleBridge
             
             // Try to find and load Zemax assemblies at runtime
             string zemaxDir = GetZemaxPath();
-            string asmDir = Path.Combine(zemaxDir, "ZOS-API Assemblies");
             
-            if (!Directory.Exists(asmDir))
-                throw new Exception("Zemax not found at " + zemaxDir);
+            // Try to find the API assemblies in various locations
+            string[] possibleApiPaths = new string[] {
+                Path.Combine(zemaxDir, "ZOS-API Assemblies"),
+                Path.Combine(zemaxDir, "ZOS-API"),
+                Path.Combine(zemaxDir, "API"),
+                zemaxDir
+            };
+            
+            string asmDir = null;
+            foreach (string path in possibleApiPaths)
+            {
+                if (Directory.Exists(path) && File.Exists(Path.Combine(path, "ZOSAPI_NetHelper.dll")))
+                {
+                    asmDir = path;
+                    Console.WriteLine("Found API assemblies at: " + asmDir);
+                    break;
+                }
+            }
+            
+            if (asmDir == null)
+                throw new Exception("Could not find ZOS-API assemblies in " + zemaxDir);
             
             // Load the NetHelper assembly
             var helperPath = Path.Combine(asmDir, "ZOSAPI_NetHelper.dll");
@@ -240,11 +330,40 @@ namespace SimpleBridge
             
             // Call ZOSAPI_Initializer.Initialize()
             var initType = helper.GetType("ZOSAPI_NetHelper.ZOSAPI_Initializer");
+            if (initType == null)
+                throw new Exception("Could not find ZOSAPI_Initializer type");
+                
             var initMethod = initType.GetMethod("Initialize", BindingFlags.Public | BindingFlags.Static);
-            bool initialized = (bool)initMethod.Invoke(null, null);
+            if (initMethod == null)
+                throw new Exception("Could not find Initialize method");
+            
+            Console.WriteLine("Calling Initialize method...");
+            bool initialized = false;
+            try 
+            {
+                // Some versions might need parameters
+                var parameters = initMethod.GetParameters();
+                if (parameters.Length == 0)
+                {
+                    initialized = (bool)initMethod.Invoke(null, null);
+                }
+                else if (parameters.Length == 1)
+                {
+                    // Might need a path parameter
+                    initialized = (bool)initMethod.Invoke(null, new object[] { zemaxDir });
+                }
+                else
+                {
+                    throw new Exception("Initialize method has " + parameters.Length + " parameters, don't know how to call it");
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new Exception("Failed to call Initialize: " + ex.Message);
+            }
             
             if (!initialized)
-                throw new Exception("Failed to initialize Zemax API");
+                throw new Exception("ZOSAPI_Initializer.Initialize() returned false");
             
             // Load main API assembly
             var apiPath = Path.Combine(asmDir, "ZOSAPI.dll");

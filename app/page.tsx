@@ -59,6 +59,35 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [bridgeStatus]);
 
+  const scanPath = async () => {
+    try {
+      push(`Scanning: ${zemaxPath}`);
+      const json = await callBridge('/scan_path', {
+        method: 'POST',
+        body: JSON.stringify({ path: zemaxPath }),
+      });
+      if (json.exists) {
+        push(`✓ Path exists`);
+        if (json.directories && json.directories.length > 0) {
+          push(`Directories found: ${json.directories.slice(0, 5).join(', ')}${json.directories.length > 5 ? '...' : ''}`);
+        }
+        if (json.api_found_in && json.api_found_in.length > 0) {
+          push(`✓ API files found in: ${json.api_found_in.join(', ')}`);
+          // Suggest the correct path
+          const suggestedPath = `${zemaxPath}\\${json.api_found_in[0]}`;
+          push(`Try setting path to: ${zemaxPath} (or maybe a parent directory)`);
+        } else {
+          push(`✗ No API files found. Try a different path or check subdirectories.`);
+        }
+      } else {
+        push(`✗ Path does not exist`);
+      }
+    } catch (err) {
+      const error = err as Error;
+      push(`✗ Scan failed: ${String(error?.message || err)}`);
+    }
+  };
+
   const setZemaxPathOnBridge = async () => {
     try {
       push(`Setting Zemax path to: ${zemaxPath}`);
@@ -80,9 +109,21 @@ export default function Home() {
       push('Starting OpticStudio (Standalone)...');
       const json = await callBridge('/start', { method: 'POST' });
       push(`✓ OK: mode=${json.mode}, license_ok=${json.license_ok}`);
-    } catch (err) {
+    } catch (err: any) {
       const error = err as Error;
       push(`✗ Failed: ${String(error?.message || err)}`);
+      
+      // Try to parse error response for more details
+      try {
+        const errorText = error.message;
+        if (errorText.includes('{')) {
+          const errorJson = JSON.parse(errorText.substring(errorText.indexOf('{')));
+          if (errorJson.details) {
+            push(`Debug info: ${errorJson.details}`);
+          }
+        }
+      } catch {}
+      
       // Try fallback protocol
       push('Attempting protocol handler fallback...');
       window.location.href = 'photonium-zemax://start';
@@ -232,6 +273,12 @@ export default function Home() {
               className="flex-1 px-3 py-2 border border-yellow-300 rounded-lg font-mono text-sm"
               placeholder="C:\Program Files\Zemax OpticStudio"
             />
+            <button
+              onClick={scanPath}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Scan
+            </button>
             <button
               onClick={setZemaxPathOnBridge}
               className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors"

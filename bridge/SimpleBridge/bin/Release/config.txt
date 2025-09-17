@@ -1,0 +1,2 @@
+# Auto-updated by website
+ZEMAX_PATH=C:\Program Files\Ansys Zemax OpticStudio 2025 R1.00
