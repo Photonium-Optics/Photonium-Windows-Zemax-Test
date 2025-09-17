@@ -1,0 +1,32 @@
+# Sample Zemax file placeholder
+# Replace this with an actual .zmx file
+VERS 21.3
+COMM Double Gauss Sample Lens
+UNIT MM
+ENVD 2.00E+01 1 0
+GFAC 0 0
+GCAT SCHOTT
+RAIM 0 0 0 0 0 0 0 0 0
+SFAC 0
+WAVM 1 5.50E-01
+SURF 0
+  TYPE STANDARD
+  CURV 0.0
+  DISZ INFINITY
+  DIAM 0.0
+SURF 1
+  TYPE STANDARD
+  CURV 0.01
+  DISZ 10.0
+  GLAS BK7
+  DIAM 25.0
+SURF 2
+  TYPE STANDARD
+  CURV -0.01
+  DISZ 5.0
+  DIAM 25.0
+SURF 3
+  TYPE STANDARD
+  CURV 0.0
+  DISZ 100.0
+  DIAM 25.0
