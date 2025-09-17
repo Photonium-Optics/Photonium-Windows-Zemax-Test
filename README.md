@@ -1,127 +1,65 @@
 # Photonium Zemax Bridge
 
-Control Zemax OpticStudio from any web browser - no Python or CLI required!
+Control Zemax OpticStudio from your web browser - no Python or complex setup required!
 
-## 🚀 Quick Start for Users (2 minutes)
+## 🚀 Quick Start
 
-1. **Install the Bridge**
-   - Download the installer from the website
-   - Run the installer (admin rights required)
-   - The bridge starts automatically
+### For Users
 
-2. **Visit the Website**
-   - Go to https://photonium-windows-zemax-test.vercel.app
-   - Click buttons to control OpticStudio
+1. **Visit the website**: https://photonium-windows-zemax-test.vercel.app
+2. **Download and run the installer** when prompted
+3. **Start controlling Zemax** with the web buttons
 
-That's it! No command line, no Python, no configuration.
+That's it! No command line, no configuration.
 
-## 🎯 What This Does
+### For Developers - Build the Bridge
 
-- **Start OpticStudio**: Launches OpticStudio in API mode (no GUI)
-- **Load .ZMX Files**: Downloads lens files from the web and loads them into OpticStudio
-- **Automatic Detection**: Website auto-detects if bridge is installed
+**No Zemax required to compile!** Build on any Windows PC:
 
-## 🛠️ For Developers
-
-### Architecture
-
-```
-Web Browser → Vercel Website → Local Bridge (C#/.NET) → ZOS-API → OpticStudio
+```cmd
+cd bridge\SimpleBridge
+C:\Windows\Microsoft.NET\Framework64\v4.0.30319\MSBuild.exe SimpleBridge.csproj /p:Configuration=Release
 ```
 
-### Building from Source
+The exe will be in `bin\Release\PhotoniumZemaxBridge.exe`
 
-#### Prerequisites
-- Visual Studio 2019+ with .NET Framework 4.8
-- Zemax OpticStudio installed (for API assemblies)
-- Inno Setup (for installer)
-
-#### Build Steps
-
-1. **Build the Bridge**
-   ```cmd
-   cd bridge\Photonium.Zemax.Bridge
-   msbuild /p:Configuration=Release /p:Platform=x64
-   ```
-
-2. **Create Installer**
-   ```cmd
-   cd bridge
-   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
-   ```
-
-3. **Deploy Website**
-   ```bash
-   npm install
-   npm run build
-   vercel --prod
-   ```
-
-### Project Structure
+## 📁 Project Structure
 
 ```
 /
-├── app/                    # Next.js website
+├── app/                    # Next.js website (Vercel)
 │   └── page.tsx           # Main control interface
-├── bridge/                # C# bridge application  
-│   ├── Photonium.Zemax.Bridge/
-│   │   ├── Program.cs     # HTTP server + ZOS-API
-│   │   └── *.csproj       # Project file
-│   └── installer.iss      # Inno Setup script
-├── public/
-│   └── zmx/              # Sample lens files
-└── README.md
+├── bridge/                
+│   ├── SimpleBridge/      # C# bridge (compiles without Zemax!)
+│   │   └── SimpleBridge.cs
+│   └── installer.iss      # Inno Setup installer script
+├── public/zmx/            # Sample lens files
+└── BUILD_INSTRUCTIONS.md  # Detailed build guide
 ```
 
-### API Endpoints
+## 🎯 Features
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Check if bridge is running |
-| `/start` | POST | Start OpticStudio (Standalone) |
-| `/open_url` | POST | Download and load .zmx file |
-| `/shutdown` | POST | Close OpticStudio |
+- **Auto-detection**: Website detects if bridge is installed
+- **One-click install**: Simple installer handles everything
+- **No dependencies**: Uses .NET Framework built into Windows
+- **Late binding**: Bridge loads Zemax at runtime, not compile time
 
-### Custom Protocol
+## 🔧 How It Works
 
-The installer registers `photonium-zemax://` protocol for fallback:
-- `photonium-zemax://start` - Start OpticStudio
-- `photonium-zemax://open?url=...` - Load file from URL
-
-## 🔒 Security
-
-- Bridge only accepts connections from `localhost` (127.0.0.1)
-- Optional CORS restriction to official website
-- No external network access from bridge
-- URL reservation allows non-admin execution
+1. Website (Vercel) → Makes HTTP calls to localhost:8765
+2. Bridge (C#) → Receives HTTP, controls Zemax via API
+3. Zemax → Loads files, performs operations
 
 ## 📋 Requirements
 
 - Windows 10/11 (64-bit)
-- Ansys Zemax OpticStudio installed
-- Valid OpticStudio license with API access
+- Zemax OpticStudio with API license
 - .NET Framework 4.8 (included in Windows)
 
-## 🐛 Troubleshooting
+## 🛠️ Building from Source
 
-| Issue | Solution |
-|-------|----------|
-| "Bridge not detected" | Run the installer and restart browser |
-| "License not available" | Check OpticStudio license |
-| "Failed to start listener" | Installer reserves URL automatically |
-| Buttons don't work | Check Windows Firewall settings |
+See [BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md) for detailed steps.
 
 ## 📄 License
 
-MIT License - See LICENSE file for details
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
-
-## 📧 Support
-
-For issues or questions, open an issue on GitHub.
+MIT License
