@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 
 const BRIDGE = 'http://127.0.0.1:8765';
 const ZMX_URL = '/zmx/DoubleGauss.zmx';
-const INSTALLER_URL = 'https://github.com/Photonium-Optics/Photonium-Windows-Zemax-Test/releases/download/v1.0.0/Photonium-Zemax-Bridge-Setup.exe';
+const INSTALLER_URL = 'https://github.com/Photonium-Optics/Photonium-Windows-Zemax-Test/releases';
 
 async function callBridge(path: string, init?: RequestInit) {
   const ctrl = new AbortController();
@@ -117,18 +117,22 @@ export default function Home() {
             <a 
               href={INSTALLER_URL}
               className="inline-block px-8 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-lg font-medium"
+              target="_blank"
+              rel="noopener noreferrer"
             >
-              ⬇ Download Photonium Zemax Bridge
+              ⬇ Go to Releases Page
             </a>
             
             <div className="text-sm text-yellow-700">
-              <p className="font-semibold mb-2">Quick Setup (2 minutes):</p>
+              <p className="font-semibold mb-2">Setup Instructions:</p>
               <ol className="list-decimal list-inside space-y-1">
-                <li>Download and run the installer</li>
-                <li>Click &quot;Install&quot; (admin rights required)</li>
+                <li>Click the button above to go to GitHub Releases</li>
+                <li>Download the latest installer (.exe file)</li>
+                <li>Run the installer (admin rights required)</li>
                 <li>The bridge will start automatically</li>
                 <li>Refresh this page to continue</li>
               </ol>
+              <p className="mt-2 text-xs italic">Note: If no release exists yet, the installer needs to be built from source on a Windows PC with Visual Studio.</p>
             </div>
           </div>
         </div>
