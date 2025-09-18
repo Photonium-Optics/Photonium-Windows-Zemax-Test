@@ -220,7 +220,7 @@ export default function Home() {
           className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
         >
           <span className="text-xl">▶</span>
-          {loading === 'start' ? 'Starting...' : 'Start OpticStudio (Standalone)'}
+          {loading === 'start' ? 'Starting...' : 'Initialize Zemax API'}
         </button>
         <button 
           onClick={onLoad}
