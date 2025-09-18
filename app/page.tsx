@@ -32,7 +32,7 @@ export default function Home() {
   const [log, setLog] = useState<string[]>([]);
   const [loading, setLoading] = useState<string | null>(null);
   const [showPathConfig, setShowPathConfig] = useState(false);
-  const [zemaxPath, setZemaxPath] = useState('C:\\Program Files\\Zemax OpticStudio');
+  const [zemaxPath, setZemaxPath] = useState('C:\\Program Files\\Ansys Zemax OpticStudio 2025 R1.00');
 
   const push = (m: string) => setLog(l => [`${new Date().toLocaleTimeString()}  ${m}`, ...l]);
 
@@ -58,39 +58,6 @@ export default function Home() {
     
     return () => clearInterval(interval);
   }, [bridgeStatus]);
-
-  const scanPath = async () => {
-    try {
-      push(`Scanning: ${zemaxPath}`);
-      const json = await callBridge('/scan_path', {
-        method: 'POST',
-        body: JSON.stringify({ path: zemaxPath }),
-      });
-      if (json.exists) {
-        push(`✓ Path exists`);
-        if (json.directories && json.directories.length > 0) {
-          push(`Directories found: ${json.directories.slice(0, 8).join(', ')}${json.directories.length > 8 ? '...' : ''}`);
-        }
-        if (json.dlls && json.dlls.length > 0) {
-          push(`DLL files: ${json.dlls.slice(0, 5).join(', ')}${json.dlls.length > 5 ? '...' : ''}`);
-        }
-        if (json.api_files && json.api_files.length > 0) {
-          push(`✓ Potential API files: ${json.api_files.join(', ')}`);
-        }
-        if (json.api_found_in && json.api_found_in.length > 0) {
-          push(`✓ API subdirectories: ${json.api_found_in.join(', ')}`);
-          push(`Try one of these paths or check the APIP directory`);
-        } else if (!json.api_files || json.api_files.length === 0) {
-          push(`✗ No obvious API files found. Check subdirectories like APIP`);
-        }
-      } else {
-        push(`✗ Path does not exist`);
-      }
-    } catch (err) {
-      const error = err as Error;
-      push(`✗ Scan failed: ${String(error?.message || err)}`);
-    }
-  };
 
   const setZemaxPathOnBridge = async () => {
     try {
@@ -275,14 +242,8 @@ export default function Home() {
               value={zemaxPath}
               onChange={(e) => setZemaxPath(e.target.value)}
               className="flex-1 px-3 py-2 border border-yellow-300 rounded-lg font-mono text-sm"
-              placeholder="C:\Program Files\Zemax OpticStudio"
+              placeholder="C:\Program Files\Ansys Zemax OpticStudio 2025 R1.00"
             />
-            <button
-              onClick={scanPath}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              Scan
-            </button>
             <button
               onClick={setZemaxPathOnBridge}
               className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors"
@@ -292,9 +253,9 @@ export default function Home() {
           </div>
           <div className="mt-2 text-xs text-yellow-600">
             Common paths: 
+            <br />• C:\Program Files\Ansys Zemax OpticStudio 2025 R1.00
             <br />• C:\Program Files\Zemax OpticStudio
             <br />• C:\Program Files\Zemax OpticStudio 2024
-            <br />• C:\Program Files\Ansys\Zemax OpticStudio
           </div>
         </div>
       )}
