@@ -115,16 +115,29 @@ export default function Home() {
       push(`✓ Loaded: ${json.loaded}`);
     } catch (err) {
       const error = err as Error;
-      push(`✗ Failed: ${String(error?.message || err)}`);
+      push(`✗ API failed: ${String(error?.message || err)}`);
       
-      // Check if the error is about missing PrimarySystem
-      if (error.message?.includes('File > New') || error.message?.includes('PrimarySystem')) {
-        push('ℹ Please create a new file in OpticStudio:');
-        push('  1. Go to OpticStudio window');
-        push('  2. Click File > New');
-        push('  3. Then click "Load .ZMX" button again');
+      // Try shell fallback if license is invalid or PrimarySystem is null
+      if (error.message?.includes('PrimarySystem') || error.message?.includes('license')) {
+        push('Trying shell fallback (opens file in OpticStudio GUI)...');
+        try {
+          const url = new URL(ZMX_URL, window.location.origin).toString();
+          const json = await callBridge('/shell_open_url', {
+            method: 'POST',
+            body: JSON.stringify({ url, filename: 'site_file.zmx' }),
+          });
+          push(`✓ Opened via shell: ${json.opened}`);
+        } catch (shellErr) {
+          const shellError = shellErr as Error;
+          push(`✗ Shell fallback failed: ${String(shellError?.message || shellErr)}`);
+          
+          // Last resort - protocol handler
+          push('Attempting protocol handler fallback...');
+          const url = encodeURIComponent(new URL(ZMX_URL, window.location.origin).toString());
+          window.location.href = `photonium-zemax://open?url=${url}&filename=site_file.zmx`;
+        }
       } else {
-        // Try fallback protocol
+        // Try protocol handler for other errors
         push('Attempting protocol handler fallback...');
         const url = encodeURIComponent(new URL(ZMX_URL, window.location.origin).toString());
         window.location.href = `photonium-zemax://open?url=${url}&filename=site_file.zmx`;

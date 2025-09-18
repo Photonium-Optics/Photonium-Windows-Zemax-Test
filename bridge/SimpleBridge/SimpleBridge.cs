@@ -188,6 +188,53 @@ namespace SimpleBridge
                 return;
             }
             
+            // POST /shell_open_url - fallback that opens file via Windows shell (no API needed)
+            if (req.HttpMethod == "POST" && path == "/shell_open_url")
+            {
+                try
+                {
+                    Console.WriteLine("Processing /shell_open_url request (no-API fallback)...");
+                    
+                    var body = new StreamReader(req.InputStream).ReadToEnd();
+                    dynamic data = _json.DeserializeObject(body);
+                    string url = data["url"];
+                    string filename = data.ContainsKey("filename") ? data["filename"] : "download.zmx";
+                    
+                    if (!filename.EndsWith(".zmx") && !filename.EndsWith(".zos"))
+                        filename += ".zmx";
+                    
+                    var tempDir = Path.Combine(Path.GetTempPath(), "photonium_zmx");
+                    Directory.CreateDirectory(tempDir);
+                    var filepath = Path.Combine(tempDir, filename);
+                    
+                    Console.WriteLine("Downloading to: " + filepath);
+                    
+                    using (var wc = new WebClient())
+                    {
+                        wc.DownloadFile(url, filepath);
+                    }
+                    
+                    Console.WriteLine("File downloaded, opening with Windows shell...");
+                    
+                    // Open with whatever app is registered for .zmx (typically OpticStudio)
+                    var psi = new System.Diagnostics.ProcessStartInfo {
+                        FileName = filepath, 
+                        UseShellExecute = true, // critical: invokes file association
+                        Verb = "open"
+                    };
+                    System.Diagnostics.Process.Start(psi);
+                    
+                    Console.WriteLine("File opened via shell association");
+                    SendJson(ctx, 200, new { ok = true, opened = filepath, via = "shell" });
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("Error in /shell_open_url: " + ex.ToString());
+                    SendJson(ctx, 500, new { ok = false, error = ex.Message });
+                }
+                return;
+            }
+            
             // POST /open_url
             if (req.HttpMethod == "POST" && path == "/open_url")
             {
@@ -256,96 +303,82 @@ namespace SimpleBridge
             Console.WriteLine("Initializing ZOS-API (Standalone)...");
             string zemaxDir = GetZemaxPath();
 
-            // Locate the assemblies (handle old and new layouts)
-            string asmA = Path.Combine(zemaxDir, "ZOS-API Assemblies"); // modern
-            string asmB = Path.Combine(zemaxDir, "ZOS-API");            // older
-            string asmDir = Directory.Exists(asmA) ? asmA :
-                            Directory.Exists(asmB) ? asmB : null;
-            if (asmDir == null) throw new Exception("ZOS-API assemblies folder not found under " + zemaxDir);
-
-            // For ZOS-API folder structure (Zemax 2025), assemblies are in subfolders
-            string zosapiPath = null;
-            string zintfPath = null;
-            string helperPath = null;
-            
-            if (asmDir.Contains("ZOS-API") && !asmDir.Contains("Assemblies"))
+            // Resolve NetHelper from the official location
+            string helperPath = Path.Combine(zemaxDir, "ZOS-API", "Libraries", "ZOSAPI_NetHelper.dll");
+            if (!File.Exists(helperPath)) 
             {
-                // Zemax 2025 structure - files in subfolders
-                helperPath = Path.Combine(asmDir, "Extensions", "ZOSAPI_NetHelper.dll");
-                // Try to find ZOSAPI.dll in Libraries or Extensions
-                zosapiPath = Path.Combine(asmDir, "Libraries", "ZOSAPI.dll");
-                if (!File.Exists(zosapiPath))
-                    zosapiPath = Path.Combine(asmDir, "Extensions", "ZOSAPI.dll");
-                zintfPath = Path.Combine(asmDir, "Libraries", "ZOSAPI_Interfaces.dll");
-                if (!File.Exists(zintfPath))
-                    zintfPath = Path.Combine(asmDir, "Extensions", "ZOSAPI_Interfaces.dll");
+                // Try Extensions as fallback for 2025
+                helperPath = Path.Combine(zemaxDir, "ZOS-API", "Extensions", "ZOSAPI_NetHelper.dll");
+            }
+            if (!File.Exists(helperPath)) 
+                throw new Exception("ZOSAPI_NetHelper.dll not found under ZOS-API\\Libraries or ZOS-API\\Extensions");
+
+            Console.WriteLine("Loading NetHelper from: " + helperPath);
+            var helperAsm = Assembly.LoadFrom(helperPath);
+            var initType = helperAsm.GetType("ZOSAPI_NetHelper.ZOSAPI_Initializer");
+            if (initType == null)
+                throw new Exception("ZOSAPI_Initializer not found");
+                
+            // Initialize with no parameters first
+            var initMethod = initType.GetMethod("Initialize", Type.EmptyTypes);
+            bool inited = false;
+            
+            if (initMethod != null)
+            {
+                inited = (bool)initMethod.Invoke(null, null);
             }
             else
             {
-                // Standard structure - files in root
-                zosapiPath = Path.Combine(asmDir, "ZOSAPI.dll");
-                zintfPath = Path.Combine(asmDir, "ZOSAPI_Interfaces.dll");
-                helperPath = Path.Combine(asmDir, "ZOSAPI_NetHelper.dll");
-            }
-
-            // Check if we have the NetHelper at least
-            if (!File.Exists(helperPath))
-                throw new Exception("ZOSAPI_NetHelper.dll not found at: " + helperPath);
-
-            // Load assemblies
-            Assembly zosapi = null;
-            Assembly zintf = null;
-            
-            if (File.Exists(zosapiPath))
-            {
-                Console.WriteLine("Loading ZOSAPI.dll from: " + zosapiPath);
-                zosapi = Assembly.LoadFrom(zosapiPath);
-            }
-            if (File.Exists(zintfPath))
-            {
-                Console.WriteLine("Loading ZOSAPI_Interfaces.dll from: " + zintfPath);
-                zintf = Assembly.LoadFrom(zintfPath);
-            }
-            
-            Console.WriteLine("Loading ZOSAPI_NetHelper.dll from: " + helperPath);
-            var helper = Assembly.LoadFrom(helperPath);
-
-            // ZOSAPI_Initializer.Initialize()
-            var initType = helper.GetType("ZOSAPI_NetHelper.ZOSAPI_Initializer");
-            if (initType == null)
-                throw new Exception("Could not find ZOSAPI_Initializer type");
-                
-            var initMethod = initType.GetMethod("Initialize", Type.EmptyTypes);
-            if (initMethod == null)
-            {
-                // Try with parameter
+                // Try with path parameter
                 initMethod = initType.GetMethod("Initialize", new Type[] { typeof(string) });
                 if (initMethod != null)
                 {
-                    bool ok = (bool)initMethod.Invoke(null, new object[] { zemaxDir });
-                    if (!ok) throw new Exception("ZOSAPI_Initializer.Initialize() returned false");
+                    inited = (bool)initMethod.Invoke(null, new object[] { zemaxDir });
                 }
                 else
                 {
                     throw new Exception("Could not find Initialize method");
                 }
             }
-            else
+            
+            if (!inited) 
+                throw new Exception("ZOSAPI_Initializer.Initialize() returned false");
+
+            // Load core assemblies from the standard folder (cover both layouts)
+            string asmA = Path.Combine(zemaxDir, "ZOS-API Assemblies");
+            string asmB = Path.Combine(zemaxDir, "ZOS-API"); // legacy
+            string asmDir = Directory.Exists(asmA) ? asmA : Directory.Exists(asmB) ? asmB : null;
+            
+            if (asmDir == null) 
+                throw new Exception("ZOS-API assemblies folder not found");
+
+            // Load the main assemblies
+            string zosapiPath = Path.Combine(asmDir, "ZOSAPI.dll");
+            string zintfPath = Path.Combine(asmDir, "ZOSAPI_Interfaces.dll");
+            
+            Assembly zosapiAsm = null;
+            
+            if (File.Exists(zosapiPath))
             {
-                bool ok = (bool)initMethod.Invoke(null, null);
-                if (!ok) throw new Exception("ZOSAPI_Initializer.Initialize() returned false");
+                Console.WriteLine("Loading ZOSAPI.dll from: " + zosapiPath);
+                zosapiAsm = Assembly.LoadFrom(zosapiPath);
+            }
+            
+            if (File.Exists(zintfPath))
+            {
+                Console.WriteLine("Loading ZOSAPI_Interfaces.dll from: " + zintfPath);
+                Assembly.LoadFrom(zintfPath);
             }
 
-            // Create Standalone application (do NOT use ConnectAsExtension / COM / UI)
+            // Create a pure Standalone session (NO COM, NO UI, NO ConnectAsExtension)
             Type connType = null;
             
-            // Try to get connection type from loaded assembly
-            if (zosapi != null)
+            if (zosapiAsm != null)
             {
-                connType = zosapi.GetType("ZOSAPI.ZOSAPI_Connection");
+                connType = zosapiAsm.GetType("ZOSAPI.ZOSAPI_Connection");
             }
             
-            // If not found, try COM
+            // Fallback to COM if assembly not found
             if (connType == null)
             {
                 connType = Type.GetTypeFromProgID("ZOSAPI.ZOSAPI_Connection");
@@ -355,11 +388,12 @@ namespace SimpleBridge
                 throw new Exception("Could not find ZOSAPI_Connection type");
                 
             dynamic conn = Activator.CreateInstance(connType);
-
-            _app = conn.CreateNewApplication();  // Standalone server
-            if (_app == null) throw new Exception("CreateNewApplication() returned null");
+            _app = conn.CreateNewApplication();   // Standalone server
             
-            // Check license
+            if (_app == null) 
+                throw new Exception("CreateNewApplication() returned null");
+
+            // IMPORTANT: without a valid API license, PrimarySystem may remain null
             bool licenseValid = false;
             try
             {
@@ -372,23 +406,41 @@ namespace SimpleBridge
             }
             
             if (!licenseValid)
-                throw new Exception("License is not valid for ZOS-API use (IsValidLicenseForAPI == false)");
+            {
+                Console.WriteLine("WARNING: License is not valid for ZOS-API (IsValidLicenseForAPI == false)");
+                Console.WriteLine("PrimarySystem will likely be null - API won't function properly");
+                // Don't throw - let it continue for testing
+            }
 
-            // Check mode
             string mode = "Unknown";
             try
             {
                 mode = _app.Mode.ToString();
                 Console.WriteLine("Connection mode: " + mode);
+                
+                if (mode != "Server" && licenseValid)
+                {
+                    throw new Exception("Expected Server mode, got: " + mode);
+                }
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Could not get mode: " + ex.Message);
+                Console.WriteLine("Could not check mode: " + ex.Message);
             }
 
             _sys = _app.PrimarySystem;
-            if (_sys == null) throw new Exception("PrimarySystem is null in Standalone (unexpected)");
-            Console.WriteLine("ZOS-API Standalone ready. Mode=" + mode);
+            if (_sys == null) 
+            {
+                Console.WriteLine("WARNING: PrimarySystem is null (expected with invalid license)");
+                if (licenseValid)
+                {
+                    throw new Exception("PrimarySystem is null despite valid license - initialization problem");
+                }
+            }
+            else
+            {
+                Console.WriteLine("ZOS-API Standalone ready. Mode=" + mode);
+            }
         }
 
         static void SetCors(HttpListenerResponse res)
