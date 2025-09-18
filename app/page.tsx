@@ -116,10 +116,19 @@ export default function Home() {
     } catch (err) {
       const error = err as Error;
       push(`✗ Failed: ${String(error?.message || err)}`);
-      // Try fallback protocol
-      push('Attempting protocol handler fallback...');
-      const url = encodeURIComponent(new URL(ZMX_URL, window.location.origin).toString());
-      window.location.href = `photonium-zemax://open?url=${url}&filename=site_file.zmx`;
+      
+      // Check if the error is about missing PrimarySystem
+      if (error.message?.includes('File > New') || error.message?.includes('PrimarySystem')) {
+        push('ℹ Please create a new file in OpticStudio:');
+        push('  1. Go to OpticStudio window');
+        push('  2. Click File > New');
+        push('  3. Then click "Load .ZMX" button again');
+      } else {
+        // Try fallback protocol
+        push('Attempting protocol handler fallback...');
+        const url = encodeURIComponent(new URL(ZMX_URL, window.location.origin).toString());
+        window.location.href = `photonium-zemax://open?url=${url}&filename=site_file.zmx`;
+      }
     } finally {
       setLoading(null);
     }

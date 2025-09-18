@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Web.Script.Serialization;
 
@@ -11,6 +12,9 @@ namespace SimpleBridge
 {
     class Program
     {
+        [DllImport("user32.dll")]
+        static extern bool SetForegroundWindow(IntPtr hWnd);
+        
         static HttpListener _http;
         static dynamic _app;  // Late binding - no compile-time reference needed
         static dynamic _sys;
@@ -128,11 +132,84 @@ namespace SimpleBridge
             {
                 try
                 {
+                    Console.WriteLine("Starting OpticStudio...");
+                    
+                    // First, try to launch OpticStudio executable
+                    string zemaxDir = GetZemaxPath();
+                    string exePath = Path.Combine(zemaxDir, "OpticStudio.exe");
+                    
+                    if (!File.Exists(exePath))
+                    {
+                        // Try alternate names
+                        string[] possibleExeNames = new string[] {
+                            "OpticStudio.exe",
+                            "Zemax.exe",
+                            "ZemaxOpticStudio.exe"
+                        };
+                        
+                        foreach (string exeName in possibleExeNames)
+                        {
+                            string tryPath = Path.Combine(zemaxDir, exeName);
+                            if (File.Exists(tryPath))
+                            {
+                                exePath = tryPath;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (File.Exists(exePath))
+                    {
+                        Console.WriteLine("Launching OpticStudio from: " + exePath);
+                        System.Diagnostics.Process.Start(exePath);
+                        
+                        // Wait a bit for OpticStudio to start
+                        Console.WriteLine("Waiting for OpticStudio to start...");
+                        System.Threading.Thread.Sleep(5000);
+                    }
+                    else
+                    {
+                        Console.WriteLine("Could not find OpticStudio.exe at: " + zemaxDir);
+                    }
+                    
+                    // Now try to connect
                     LoadZemaxIfNeeded();
+                    
+                    // Safely check properties
+                    string mode = "Standalone";
+                    bool licenseOk = false;
+                    
+                    try
+                    {
+                        if (_app != null)
+                        {
+                            mode = _app.Mode.ToString();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("Could not get Mode: " + ex.Message);
+                    }
+                    
+                    try
+                    {
+                        if (_app != null)
+                        {
+                            licenseOk = _app.IsValidLicenseForAPI;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("Could not check license: " + ex.Message);
+                        // Assume license is OK if we got this far
+                        licenseOk = true;
+                    }
+                    
                     SendJson(ctx, 200, new { 
                         ok = true, 
-                        mode = _app != null ? _app.Mode.ToString() : "Unknown",
-                        license_ok = _app != null ? _app.IsValidLicenseForAPI : false
+                        mode = mode,
+                        license_ok = licenseOk,
+                        opticstudio_launched = File.Exists(exePath)
                     });
                 }
                 catch (Exception ex)
@@ -189,12 +266,26 @@ namespace SimpleBridge
             {
                 try
                 {
-                    LoadZemaxIfNeeded();
+                    Console.WriteLine("Processing /open_url request...");
+                    
+                    // If we don't have a connection, try to establish one
+                    if (_app == null)
+                    {
+                        Console.WriteLine("No connection to OpticStudio, attempting to connect...");
+                        LoadZemaxIfNeeded();
+                    }
+                    
+                    // Don't worry about _sys being null - FileOpen will create it
                     
                     var body = new StreamReader(req.InputStream).ReadToEnd();
+                    Console.WriteLine("Request body: " + body);
+                    
                     dynamic data = _json.DeserializeObject(body);
                     string url = data["url"];
                     string filename = data.ContainsKey("filename") ? data["filename"] : "download.zmx";
+                    
+                    Console.WriteLine("URL: " + url);
+                    Console.WriteLine("Filename: " + filename);
                     
                     if (!filename.EndsWith(".zmx") && !filename.EndsWith(".zos"))
                         filename += ".zmx";
@@ -203,18 +294,138 @@ namespace SimpleBridge
                     Directory.CreateDirectory(tempDir);
                     var filepath = Path.Combine(tempDir, filename);
                     
+                    Console.WriteLine("Downloading to: " + filepath);
+                    
                     using (var wc = new WebClient())
                     {
                         wc.DownloadFile(url, filepath);
                     }
                     
-                    bool ok = _sys.LoadFile(filepath, false);
-                    if (!ok) throw new Exception("Failed to load file");
+                    Console.WriteLine("File downloaded successfully");
                     
+                    // Check if _app is available
+                    if (_app == null)
+                    {
+                        Console.WriteLine("ERROR: _app is null, cannot load file");
+                        throw new Exception("Not connected to OpticStudio");
+                    }
+                    
+                    Console.WriteLine("Loading file into OpticStudio...");
+                    bool ok = false;
+                    
+                    // First, check if we have a PrimarySystem
+                    if (_sys == null)
+                    {
+                        try
+                        {
+                            _sys = _app.PrimarySystem;
+                        }
+                        catch {}
+                    }
+                    
+                    if (_sys == null)
+                    {
+                        Console.WriteLine("No PrimarySystem available. Need to create a blank file first.");
+                        
+                        // Try different approaches to create a new system
+                        Console.WriteLine("Attempting to create a new system...");
+                        
+                        // Try approach 1: Use CreateNewSystem on connection
+                        try
+                        {
+                            Console.WriteLine("Reconnecting to create new system...");
+                            
+                            // Reset connection and try to create new
+                            _app = null;
+                            _sys = null;
+                            
+                            Type connType = Type.GetTypeFromProgID("ZOSAPI.ZOSAPI_Connection");
+                            if (connType != null)
+                            {
+                                dynamic conn = Activator.CreateInstance(connType);
+                                
+                                // Try to create in standalone mode with a new system
+                                Console.WriteLine("Creating new application with system...");
+                                _app = conn.CreateNewApplication();
+                                
+                                // Wait a bit for initialization
+                                System.Threading.Thread.Sleep(1000);
+                                
+                                // Try to get or create PrimarySystem
+                                _sys = _app.PrimarySystem;
+                                
+                                if (_sys == null)
+                                {
+                                    Console.WriteLine("PrimarySystem still null, attempting manual file creation...");
+                                    
+                                    // Send message to user
+                                    Console.WriteLine("IMPORTANT: Please manually do one of the following in OpticStudio:");
+                                    Console.WriteLine("  1. Click File > New to create a new lens file");
+                                    Console.WriteLine("  2. Or open any existing .zmx file");
+                                    Console.WriteLine("Then click 'Load .ZMX from this site' again.");
+                                    
+                                    throw new Exception("Please create a new file in OpticStudio (File > New), then try again");
+                                }
+                                else
+                                {
+                                    Console.WriteLine("PrimarySystem obtained after reconnection!");
+                                }
+                            }
+                        }
+                        catch (Exception reconEx)
+                        {
+                            Console.WriteLine("Reconnection attempt: " + reconEx.Message);
+                            
+                            // Final fallback - tell user what to do
+                            throw new Exception("No lens file open in OpticStudio. Please click File > New in OpticStudio, then try again.");
+                        }
+                    }
+                    
+                    // Now try to load the file if we have PrimarySystem
+                    if (_sys != null)
+                    {
+                        try
+                        {
+                            Console.WriteLine("Have PrimarySystem, loading file...");
+                            ok = _sys.LoadFile(filepath, false);
+                            Console.WriteLine("LoadFile returned: " + ok);
+                        }
+                        catch (Exception loadEx)
+                        {
+                            Console.WriteLine("LoadFile failed: " + loadEx.Message);
+                            
+                            // Try alternative: SaveAs
+                            try
+                            {
+                                Console.WriteLine("Trying alternative: New() then LoadFile...");
+                                _sys.New(false); // Clear system
+                                ok = _sys.LoadFile(filepath, false);
+                                Console.WriteLine("LoadFile after New returned: " + ok);
+                            }
+                            catch (Exception newEx)
+                            {
+                                Console.WriteLine("New+LoadFile failed: " + newEx.Message);
+                                throw new Exception("Could not load file: " + loadEx.Message);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        throw new Exception("No PrimarySystem available. Please create or open a file in OpticStudio first.");
+                    }
+                    
+                    if (!ok) 
+                    {
+                        Console.WriteLine("LoadFile returned false");
+                        throw new Exception("OpticStudio could not load the file (LoadFile returned false)");
+                    }
+                    
+                    Console.WriteLine("File loaded successfully in OpticStudio");
                     SendJson(ctx, 200, new { ok = true, loaded = filepath });
                 }
                 catch (Exception ex)
                 {
+                    Console.WriteLine("Error in /open_url: " + ex.ToString());
                     SendJson(ctx, 500, new { ok = false, error = ex.Message });
                 }
                 return;
@@ -226,7 +437,7 @@ namespace SimpleBridge
 
         static void LoadZemaxIfNeeded()
         {
-            if (_app != null) return;
+            if (_app != null && _sys != null) return;
             
             Console.WriteLine("Loading Zemax API...");
             
@@ -246,7 +457,15 @@ namespace SimpleBridge
                     
                     if (_app != null)
                     {
-                        _sys = _app.PrimarySystem;
+                        try
+                        {
+                            _sys = _app.PrimarySystem;
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine("Could not get PrimarySystem: " + ex.Message);
+                            _sys = null;
+                        }
                         Console.WriteLine("Zemax API loaded successfully via COM");
                         return;
                     }
@@ -320,7 +539,15 @@ namespace SimpleBridge
                     _app = Activator.CreateInstance(appType);
                     if (_app != null)
                     {
-                        _sys = _app.PrimarySystem;
+                        try
+                        {
+                            _sys = _app.PrimarySystem;
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine("Could not get PrimarySystem: " + ex.Message);
+                            _sys = null;
+                        }
                         Console.WriteLine("Zemax API loaded successfully via COM after Initialize");
                         return;
                     }
@@ -336,8 +563,54 @@ namespace SimpleBridge
                 {
                     Console.WriteLine("Found ZOSAPI_Connection via COM");
                     dynamic conn = Activator.CreateInstance(connType);
+                    
+                    // Check if OpticStudio is running by looking for the process
+                    var zemaxProcesses = System.Diagnostics.Process.GetProcessesByName("OpticStudio");
+                    bool isRunning = zemaxProcesses.Length > 0;
+                    Console.WriteLine("OpticStudio process running: " + isRunning);
+                    
+                    // Always use CreateNewApplication for standalone mode
+                    Console.WriteLine("Creating application connection (Standalone mode)...");
                     _app = conn.CreateNewApplication();
-                    _sys = _app.PrimarySystem;
+                    
+                    if (_app == null)
+                    {
+                        Console.WriteLine("CreateNewApplication returned null");
+                        throw new Exception("Failed to create application");
+                    }
+                    
+                    Console.WriteLine("Application created, type: " + _app.GetType().FullName);
+                    
+                    // Check license
+                    try
+                    {
+                        bool hasValidLicense = _app.IsValidLicenseForAPI;
+                        Console.WriteLine("License valid: " + hasValidLicense);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("Could not check license: " + ex.Message);
+                    }
+                    
+                    Console.WriteLine("Getting PrimarySystem...");
+                    try
+                    {
+                        _sys = _app.PrimarySystem;
+                        if (_sys != null)
+                        {
+                            Console.WriteLine("PrimarySystem obtained successfully");
+                        }
+                        else
+                        {
+                            Console.WriteLine("PrimarySystem is null - will be created when opening a file");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("Could not get PrimarySystem: " + ex.Message);
+                        _sys = null;
+                    }
+                    
                     Console.WriteLine("Zemax API loaded successfully");
                     return;
                 }
