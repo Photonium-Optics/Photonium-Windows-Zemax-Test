@@ -16,7 +16,6 @@ namespace SimpleBridge
         static dynamic _sys;
         static JavaScriptSerializer _json = new JavaScriptSerializer();
         static string _origin = "*";
-        static Assembly _zosApi;
         static string _customZemaxPath = null;
 
         static string GetZemaxPath()
@@ -234,17 +233,45 @@ namespace SimpleBridge
             // Get Zemax installation path
             string zemaxDir = GetZemaxPath();
             
-            // ZOS-API is directly in the Zemax folder
-            string asmDir = Path.Combine(zemaxDir, "ZOS-API");
+            try
+            {
+                // Try COM approach first for Zemax 2025
+                Console.WriteLine("Trying COM-based connection for Zemax 2025...");
+                Type appType = Type.GetTypeFromProgID("ZOSAPI.ZOSAPI_Application");
+                
+                if (appType != null)
+                {
+                    Console.WriteLine("Found ZOSAPI_Application via COM");
+                    _app = Activator.CreateInstance(appType);
+                    
+                    if (_app != null)
+                    {
+                        _sys = _app.PrimarySystem;
+                        Console.WriteLine("Zemax API loaded successfully via COM");
+                        return;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("COM approach failed: " + ex.Message);
+            }
             
-            if (!Directory.Exists(asmDir))
-                throw new Exception("ZOS-API folder not found at: " + asmDir);
+            // Fallback to NetHelper approach
+            Console.WriteLine("Trying NetHelper approach...");
             
-            // Load the NetHelper assembly
-            var helperPath = Path.Combine(asmDir, "ZOSAPI_NetHelper.dll");
+            // ZOS-API folder structure
+            string zosApiDir = Path.Combine(zemaxDir, "ZOS-API");
+            
+            if (!Directory.Exists(zosApiDir))
+                throw new Exception("ZOS-API folder not found at: " + zosApiDir);
+            
+            // Load the NetHelper assembly from Extensions folder
+            var helperPath = Path.Combine(zosApiDir, "Extensions", "ZOSAPI_NetHelper.dll");
             if (!File.Exists(helperPath))
                 throw new Exception("ZOSAPI_NetHelper.dll not found at: " + helperPath);
                 
+            Console.WriteLine("Loading ZOSAPI_NetHelper.dll from: " + helperPath);
             var helper = Assembly.LoadFrom(helperPath);
             
             // Call ZOSAPI_Initializer.Initialize()
@@ -266,9 +293,13 @@ namespace SimpleBridge
                 {
                     initialized = (bool)initMethod.Invoke(null, null);
                 }
+                else if (parameters.Length == 1)
+                {
+                    initialized = (bool)initMethod.Invoke(null, new object[] { zemaxDir });
+                }
                 else
                 {
-                    throw new Exception("Initialize method has " + parameters.Length + " parameters, unexpected signature");
+                    throw new Exception("Unexpected Initialize signature");
                 }
             }
             catch (Exception ex)
@@ -279,23 +310,41 @@ namespace SimpleBridge
             if (!initialized)
                 throw new Exception("ZOSAPI_Initializer.Initialize() returned false");
             
-            // Load main API assembly
-            var apiPath = Path.Combine(asmDir, "ZOSAPI.dll");
-            if (!File.Exists(apiPath))
-                throw new Exception("ZOSAPI.dll not found at: " + apiPath);
-                
-            _zosApi = Assembly.LoadFrom(apiPath);
+            // After initialization, try COM again
+            Console.WriteLine("Trying COM after Initialize...");
+            try
+            {
+                Type appType = Type.GetTypeFromProgID("ZOSAPI.ZOSAPI_Application");
+                if (appType != null)
+                {
+                    _app = Activator.CreateInstance(appType);
+                    if (_app != null)
+                    {
+                        _sys = _app.PrimarySystem;
+                        Console.WriteLine("Zemax API loaded successfully via COM after Initialize");
+                        return;
+                    }
+                }
+            }
+            catch {}
             
-            // Create connection and app
-            var connType = _zosApi.GetType("ZOSAPI.ZOSAPI_Connection");
-            dynamic conn = Activator.CreateInstance(connType);
-            _app = conn.CreateNewApplication();
+            // Last resort: try creating connection directly
+            try
+            {
+                Type connType = Type.GetTypeFromProgID("ZOSAPI.ZOSAPI_Connection");
+                if (connType != null)
+                {
+                    Console.WriteLine("Found ZOSAPI_Connection via COM");
+                    dynamic conn = Activator.CreateInstance(connType);
+                    _app = conn.CreateNewApplication();
+                    _sys = _app.PrimarySystem;
+                    Console.WriteLine("Zemax API loaded successfully");
+                    return;
+                }
+            }
+            catch {}
             
-            if (_app == null || !_app.IsValidLicenseForAPI)
-                throw new Exception("No valid Zemax license");
-                
-            _sys = _app.PrimarySystem;
-            Console.WriteLine("Zemax API loaded successfully");
+            throw new Exception("Could not connect to Zemax API. Make sure Zemax OpticStudio is installed correctly.");
         }
 
         static void SetCors(HttpListenerResponse res)
