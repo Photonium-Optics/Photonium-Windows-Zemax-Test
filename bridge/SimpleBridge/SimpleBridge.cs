@@ -21,6 +21,8 @@ namespace SimpleBridge
         static JavaScriptSerializer _json = new JavaScriptSerializer();
         static string _origin = "*";
         static string _customZemaxPath = null;
+        static bool _apiReady = false;     // true only when license is valid and PrimarySystem exists
+        static string _lastInitError = null;
 
         static string GetZemaxPath()
         {
@@ -124,6 +126,20 @@ namespace SimpleBridge
             if (req.HttpMethod == "GET" && path == "/health")
             {
                 SendJson(ctx, 200, new { ok = true, bridge = "simple" });
+                return;
+            }
+
+            // GET /info
+            if (req.HttpMethod == "GET" && path == "/info")
+            {
+                var payload = new {
+                    ok = true,
+                    mode = _app != null ? SafeGetString(() => _app.Mode.ToString()) : "None",
+                    license_ok = _app != null && SafeGetBool(() => _app.IsValidLicenseForAPI),
+                    api_ready = _apiReady,
+                    last_error = _lastInitError,
+                };
+                SendJson(ctx, 200, payload);
                 return;
             }
 
@@ -268,10 +284,25 @@ namespace SimpleBridge
                     
                     Console.WriteLine("File downloaded successfully");
                     
-                    // Ensure we have a Standalone connection
+                    // Try to ensure we have a connection
                     LoadZemaxIfNeeded();
                     
-                    // Clear the system and load the new file
+                    // Check if API is ready
+                    if (!_apiReady || _sys == null)
+                    {
+                        // Don't crash—tell the client exactly what to do instead
+                        Console.WriteLine("API not ready - returning 409");
+                        SendJson(ctx, 409, new {
+                            ok = false,
+                            code = "api_unavailable",
+                            reason = _lastInitError ?? "ZOS-API not ready",
+                            hint = "Use /shell_open_url to open via GUI file association",
+                            filepath = filepath
+                        });
+                        return;
+                    }
+                    
+                    // API is ready: do the real load
                     Console.WriteLine("Loading file into OpticStudio...");
                     _sys.New(false);  // Clear to a new sequential system
                     bool ok = _sys.LoadFile(filepath, false);
@@ -282,7 +313,7 @@ namespace SimpleBridge
                     }
                     
                     Console.WriteLine("File loaded successfully in OpticStudio");
-                    SendJson(ctx, 200, new { ok = true, loaded = filepath });
+                    SendJson(ctx, 200, new { ok = true, loaded = filepath, via = "zosapi" });
                 }
                 catch (Exception ex)
                 {
@@ -298,7 +329,11 @@ namespace SimpleBridge
 
         static void LoadZemaxIfNeeded()
         {
-            if (_app != null && _sys != null) return;
+            if (_app != null && _apiReady) return;
+
+            // Reset state
+            _apiReady = false;
+            _lastInitError = null;
 
             Console.WriteLine("Initializing ZOS-API (Standalone)...");
             string zemaxDir = GetZemaxPath();
@@ -311,13 +346,19 @@ namespace SimpleBridge
                 helperPath = Path.Combine(zemaxDir, "ZOS-API", "Extensions", "ZOSAPI_NetHelper.dll");
             }
             if (!File.Exists(helperPath)) 
+            {
+                _lastInitError = "ZOSAPI_NetHelper.dll not found";
                 throw new Exception("ZOSAPI_NetHelper.dll not found under ZOS-API\\Libraries or ZOS-API\\Extensions");
+            }
 
             Console.WriteLine("Loading NetHelper from: " + helperPath);
             var helperAsm = Assembly.LoadFrom(helperPath);
             var initType = helperAsm.GetType("ZOSAPI_NetHelper.ZOSAPI_Initializer");
             if (initType == null)
+            {
+                _lastInitError = "ZOSAPI_Initializer type not found";
                 throw new Exception("ZOSAPI_Initializer not found");
+            }
                 
             // Initialize with no parameters first
             var initMethod = initType.GetMethod("Initialize", Type.EmptyTypes);
@@ -337,12 +378,16 @@ namespace SimpleBridge
                 }
                 else
                 {
+                    _lastInitError = "Initialize method not found";
                     throw new Exception("Could not find Initialize method");
                 }
             }
             
             if (!inited) 
+            {
+                _lastInitError = "ZOSAPI_Initializer.Initialize() returned false";
                 throw new Exception("ZOSAPI_Initializer.Initialize() returned false");
+            }
 
             // Load core assemblies from the standard folder (cover both layouts)
             string asmA = Path.Combine(zemaxDir, "ZOS-API Assemblies");
@@ -350,7 +395,10 @@ namespace SimpleBridge
             string asmDir = Directory.Exists(asmA) ? asmA : Directory.Exists(asmB) ? asmB : null;
             
             if (asmDir == null) 
+            {
+                _lastInitError = "ZOS-API assemblies folder not found";
                 throw new Exception("ZOS-API assemblies folder not found");
+            }
 
             // Load the main assemblies
             string zosapiPath = Path.Combine(asmDir, "ZOSAPI.dll");
@@ -385,15 +433,21 @@ namespace SimpleBridge
             }
             
             if (connType == null)
+            {
+                _lastInitError = "ZOSAPI_Connection type not found";
                 throw new Exception("Could not find ZOSAPI_Connection type");
+            }
                 
             dynamic conn = Activator.CreateInstance(connType);
             _app = conn.CreateNewApplication();   // Standalone server
             
             if (_app == null) 
+            {
+                _lastInitError = "CreateNewApplication() returned null";
                 throw new Exception("CreateNewApplication() returned null");
+            }
 
-            // IMPORTANT: without a valid API license, PrimarySystem may remain null
+            // Check license
             bool licenseValid = false;
             try
             {
@@ -407,40 +461,55 @@ namespace SimpleBridge
             
             if (!licenseValid)
             {
+                _lastInitError = "ZOS-API license not valid";
+                _sys = null;
                 Console.WriteLine("WARNING: License is not valid for ZOS-API (IsValidLicenseForAPI == false)");
-                Console.WriteLine("PrimarySystem will likely be null - API won't function properly");
-                // Don't throw - let it continue for testing
+                return; // leave _apiReady=false
             }
 
+            // Check mode
             string mode = "Unknown";
             try
             {
                 mode = _app.Mode.ToString();
                 Console.WriteLine("Connection mode: " + mode);
-                
-                if (mode != "Server" && licenseValid)
-                {
-                    throw new Exception("Expected Server mode, got: " + mode);
-                }
             }
             catch (Exception ex)
             {
                 Console.WriteLine("Could not check mode: " + ex.Message);
             }
+            
+            if (mode != "Server")
+            {
+                _lastInitError = "Expected Server mode, got: " + mode;
+                _sys = null;
+                return; // leave _apiReady=false
+            }
 
+            // Get PrimarySystem
             _sys = _app.PrimarySystem;
             if (_sys == null) 
             {
-                Console.WriteLine("WARNING: PrimarySystem is null (expected with invalid license)");
-                if (licenseValid)
-                {
-                    throw new Exception("PrimarySystem is null despite valid license - initialization problem");
-                }
+                _lastInitError = "PrimarySystem is null (license or init problem)";
+                Console.WriteLine("WARNING: PrimarySystem is null");
+                return; // leave _apiReady=false
             }
-            else
-            {
-                Console.WriteLine("ZOS-API Standalone ready. Mode=" + mode);
-            }
+            
+            // Success!
+            _apiReady = true;
+            Console.WriteLine("ZOS-API Standalone ready. Mode=" + mode);
+        }
+
+        static bool SafeGetBool(Func<bool> f) 
+        { 
+            try { return f(); } 
+            catch { return false; } 
+        }
+        
+        static string SafeGetString(Func<string> f)
+        {
+            try { return f(); }
+            catch { return "Unknown"; }
         }
 
         static void SetCors(HttpListenerResponse res)
